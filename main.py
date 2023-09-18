@@ -6,7 +6,7 @@ import numpy as np
 
 from functools import partial
 from tkinter import *
-from tkinter.filedialog import asksaveasfile
+from tkinter.filedialog import asksaveasfile, askopenfile
 
 from matplotlib import pyplot as plt
 
@@ -26,16 +26,46 @@ class Entries:
         self.parent_window = parent_window
 
     # adding of new entry (добавление нового текстового поля)
-    def add_entry(self):
+    def add_entry(self,  entry_text=''):
         new_entry = Entry(self.parent_window)
         new_entry.icursor(0)
         new_entry.focus()
         new_entry.pack()
-        plot_button = self.parent_window.get_button_by_name('plot')
-        if plot_button:
-            plot_button.pack_forget()
-        self.parent_window.add_button('plot', 'Plot', 'plot', hot_key='<Return>')
+        new_entry.insert(0, entry_text)
         self.entries_list.append(new_entry)
+
+    def del_func(self):
+        focus = self.parent_window.focus_get()
+        if type(focus) == Entry:
+            if focus.get() != '':
+                active_window = ModalWindow(self.parent_window, title='Удаление функции', labeltext="Вы уверены?")
+                cd = partial(active_window.continue_del, entry=focus, entries_list=self.entries_list)
+                continue_button = Button(master=active_window.top, text='Да', command=cd)
+                cancel_button = Button(master=active_window.top, text='Нет', command=active_window.cancel)
+                active_window.add_button(continue_button)
+                active_window.add_button(cancel_button)
+            else:
+                focus.delete(0, END)
+
+    def clean_text(self):
+        focus = self.parent_window.focus_get()
+        if type(focus) == Entry:
+            if focus.get() != '':
+                active_window = ModalWindow(self.parent_window, title='Очистка текстового поля', labeltext="Вы уверены?")
+                cct = partial(active_window.continue_cleaning_text, entry=focus)
+                continue_button = Button(master=active_window.top, text='Да', command=cct)
+                cancel_button = Button(master=active_window.top, text='Нет', command=active_window.cancel)
+                active_window.add_button(continue_button)
+                active_window.add_button(cancel_button)
+            else:
+                focus.delete(0, END)
+
+    def import_entries_state(self, list_of_function):
+        for entry in self.entries_list:
+            entry.pack_forget()
+        self.entries_list = []
+        for func in list_of_function:
+            self.add_entry(entry_text=func)
 
 
 # class for plotting (класс для построения графиков)
@@ -114,16 +144,17 @@ class Commands:
         if self.__navigation_toolbar is not None:
             self.__navigation_toolbar.pack_forget()
 
-    def plot(self, *args, **kwargs):
-        def is_not_blank(s):
-            return bool(s and not s.isspace())
+    @staticmethod
+    def is_not_blank(s):
+        return bool(s and not s.isspace())
 
+    def plot(self, *args, **kwargs):
         self._state.reset_state()
         list_of_function = []
         for entry in self.parent_window.entries.entries_list:
             get_func_str = entry.get()
             self._state.list_of_function.append(get_func_str)
-            if is_not_blank(get_func_str):
+            if self.is_not_blank(get_func_str):
                 list_of_function.append(get_func_str)
             else:
                 if self.__empty_entry_counter == 0:
@@ -144,18 +175,35 @@ class Commands:
         self.__forget_navigation()
         self.__navigation_toolbar = NavigationToolbar2Tk(self.__figure_canvas, self.parent_window)
         self.__figure_canvas.get_tk_widget().pack(side=TOP, fill=BOTH, expand=1)
-        plot_button = self.parent_window.get_button_by_name('plot')
-        if plot_button:
-            plot_button.pack_forget()
+
 
     def add_func(self, *args, **kwargs):
         self.__forget_canvas()
         self.__forget_navigation()
         self.parent_window.entries.add_entry()
 
+    def del_func(self, *args, **kwargs):
+        self.__forget_canvas()
+        self.__forget_navigation()
+        self.parent_window.entries.del_func()
+
+    def clean_text(self, *args, **kwargs):
+        self.__forget_canvas()
+        self.__forget_navigation()
+        self.parent_window.entries.clean_text()
+
     def save_as(self):
         self._state.save_state()
         return self
+
+    def load_from(self):
+        filename = askopenfile()
+        if filename is None:
+            return
+        self._state.reset_state()
+        self._state.list_of_function = json.load(filename)['list_of_function']
+        self.parent_window.entries.import_entries_state(self._state.list_of_function)
+
 
 
 # class for buttons storage (класс для хранения кнопок)
@@ -198,6 +246,15 @@ class ModalWindow:
     def cancel(self):
         self.top.destroy()
 
+    def continue_del(self, entry, entries_list):
+        entry.delete(0, END)
+        self.top.destroy()
+        entries_list.pop(entries_list.index(entry)).destroy()
+
+    def continue_cleaning_text(self, entry):
+        entry.delete(0, END)
+        self.top.destroy()
+
 
 # app class (класс приложения)
 class App(Tk):
@@ -231,6 +288,7 @@ class App(Tk):
 
         file_menu = Menu(menu)
         file_menu.add_command(label="Save as...", command=self.commands.get_command_by_name('save_as'))
+        file_menu.add_command(label="Load from...", command=self.commands.get_command_by_name('load_from'))
         menu.add_cascade(label="File", menu=file_menu)
 
 
@@ -248,10 +306,16 @@ if __name__ == "__main__":
     commands_main.add_command('plot', commands_main.plot)
     commands_main.add_command('add_func', commands_main.add_func)
     commands_main.add_command('save_as', commands_main.save_as)
+    commands_main.add_command('del_func', commands_main.del_func)
+    commands_main.add_command('clean_text', commands_main.clean_text)
+    commands_main.add_command('load_from', commands_main.load_from)
     # init app (создаем экземпляр приложения)
     app = App(buttons_main, plotter_main, commands_main, entries_main)
     # init add func button (добавляем кнопку добавления новой функции)
     app.add_button('add_func', 'Добавить функцию', 'add_func', hot_key='<Control-a>')
+    app.add_button('del_func', 'Удалить функцию', 'del_func', hot_key='<Control-d>')
+    app.add_button('clean_text', 'Очистить текстовое поле', 'clean_text', hot_key='<Control-l>')
+    app.add_button('plot', 'Plot', 'plot', hot_key='<Return>')
     # init first entry (создаем первое поле ввода)
     entries_main.add_entry()
     app.create_menu()
